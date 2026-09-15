@@ -1,0 +1,9 @@
+apiVersion: projectcontour.io/v1alpha1
+kind: ExtensionService
+metadata:
+  name: htpasswd
+spec:
+  protocol: h2
+  services:
+    - name: htpasswd
+      port: 9443

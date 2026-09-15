@@ -1,0 +1,66 @@
+# NVIDIA device plugin — exposes nvidia.com/gpu on Kind nodes.
+# https://github.com/NVIDIA/k8s-device-plugin
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: system-node-critical
+      containers:
+        # Built locally via scripts/build-gpu-device-plugin.sh (nvcr.io often returns 403).
+        - image: localhost/k8s-device-plugin:v0.17.0
+          imagePullPolicy: IfNotPresent
+          name: nvidia-device-plugin-ctr
+          env:
+            - name: FAIL_ON_INIT_ERROR
+              value: "true"
+            # Only expose the RTX 4060 family GPU to Kubernetes (__GPU_DEVICE_UUID__ replaced by make gpu).
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "__GPU_DEVICE_UUID__"
+            - name: LD_LIBRARY_PATH
+              value: /usr/lib/x86_64-linux-gnu
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dev-nvidiactl
+              mountPath: /dev/nvidiactl
+            - name: dev-nvidia-uvm
+              mountPath: /dev/nvidia-uvm
+            - name: dev-nvidia-uvm-tools
+              mountPath: /dev/nvidia-uvm-tools
+            - name: nvidia-libs
+              mountPath: /usr/lib/x86_64-linux-gnu
+              readOnly: true
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dev-nvidiactl
+          hostPath:
+            path: /dev/nvidiactl
+        - name: dev-nvidia-uvm
+          hostPath:
+            path: /dev/nvidia-uvm
+        - name: dev-nvidia-uvm-tools
+          hostPath:
+            path: /dev/nvidia-uvm-tools
+        - name: nvidia-libs
+          hostPath:
+            path: /usr/lib/x86_64-linux-gnu

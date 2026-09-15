@@ -1,0 +1,42 @@
+# Default Kind cluster (no GPU). For NVIDIA GPU support use cluster.gpu.yaml via:
+#   make down && make up WITH_GPU=1
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Envoy hostPort 80/443 on the Kind node → host :80 / :443.
+      # Bind 0.0.0.0 so Let's Encrypt HTTP-01 and LAN/WAN port-forwards can reach Contour.
+      # Recreate the cluster after changing these mappings: make down && make up
+      - containerPort: 80
+        hostPort: 80
+        listenAddress: "0.0.0.0"
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        listenAddress: "0.0.0.0"
+        protocol: TCP
+      # Dashboard Kong NodePort → localhost :8443
+      - containerPort: 30443
+        hostPort: 8443
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+    extraMounts:
+      # Host data-plane (substituted by k8s/Makefile) → node /data-plane.
+      # App PVs use hostPath /data-plane/<app>, e.g. sprar → ../../data-plane/sprar.
+      # Recreate the cluster after changing extraMounts: make down && make up
+      - hostPath: __DATA_PLANE_HOST__
+        containerPath: /data-plane
+      # Sprar repo for DEV=1 plugin/template bind-mounts (sprar/Makefile).
+      - hostPath: __SPRAR_HOST__
+        containerPath: /sprar-src

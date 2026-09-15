@@ -1,0 +1,31 @@
+# Kubernetes Dashboard Helm values for the local Kind cluster.
+# Disable bundled nginx/cert-manager: this repo already uses Contour.
+# Kong TLS is a NodePort mapped by Kind to https://127.0.0.1:8443.
+app:
+  ingress:
+    enabled: false
+  settings:
+    global:
+      clusterName: kind-k8s
+
+cert-manager:
+  enabled: false
+
+nginx:
+  enabled: false
+
+# Kind kubelets use self-signed serving certs; metrics-server needs this to scrape them.
+metrics-server:
+  enabled: true
+  args:
+    - --kubelet-preferred-address-types=InternalIP
+    - --kubelet-insecure-tls
+
+kong:
+  proxy:
+    type: NodePort
+    http:
+      enabled: false
+    tls:
+      enabled: true
+      nodePort: 30443

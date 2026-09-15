@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: htpasswd
+  labels:
+    app.kubernetes.io/name: htpasswd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: htpasswd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: htpasswd
+    spec:
+      serviceAccountName: htpasswd
+      containers:
+        - name: htpasswd
+          image: ghcr.io/projectcontour/contour-authserver:v4
+          imagePullPolicy: IfNotPresent
+          command:
+            - /contour-authserver
+          args:
+            - htpasswd
+            - --address=:9443
+            - --tls-ca-path=/tls/ca.crt
+            - --tls-cert-path=/tls/tls.crt
+            - --tls-key-path=/tls/tls.key
+            - --watch-namespaces=projectcontour-auth
+          ports:
+            - name: auth
+              containerPort: 9443
+              protocol: TCP
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          resources:
+            limits:
+              cpu: 100m
+              memory: 90Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: htpasswd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: htpasswd
+  labels:
+    app.kubernetes.io/name: htpasswd
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: htpasswd
+  ports:
+    - name: auth
+      protocol: TCP
+      port: 9443
+      targetPort: 9443

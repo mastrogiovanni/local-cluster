@@ -1,0 +1,16 @@
+apiVersion: projectcontour.io/v1
+kind: HTTPProxy
+metadata:
+  name: ingress-root
+  namespace: k8s-local
+spec:
+  virtualhost:
+    fqdn: __INGRESS_HOST__
+  routes:
+    - conditions:
+        - prefix: /.contour-ready
+      authPolicy:
+        disabled: true
+      directResponsePolicy:
+        statusCode: 200
+        body: ok

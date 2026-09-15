@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: htpasswd
+  labels:
+    app.kubernetes.io/name: htpasswd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: htpasswd
+subjects:
+  - kind: ServiceAccount
+    name: htpasswd

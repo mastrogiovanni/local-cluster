@@ -34,7 +34,7 @@ App directories register path includes on `ingress-root`. After they are deploye
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Go 1.23+](https://go.dev/dl/) (optional, for running apps such as echo-proxy outside Docker)
-- [Helm 3](https://helm.sh/docs/intro/install/) (required for the optional Temporal stack and Kubernetes Dashboard)
+- [Helm 3](https://helm.sh/docs/intro/install/) (required for Kubernetes Dashboard and optional app installs such as Temporal)
 - Localhost ports **80** and **443** must be free (Kind binds Contour there)
 
 For GPU workloads (e.g. sprar Baidu OCR), you also need:
@@ -217,100 +217,15 @@ cd ../echo-proxy && make redeploy
 
 See [../echo-proxy/README.md](../echo-proxy/README.md) for image build details and environment variables.
 
-## Optional Temporal HA stack
+## Temporal
 
-Temporal lives in [`../temporal`](../temporal). After the Kind cluster exists:
-
-```bash
-cd ../temporal && make up
-```
-
-The Web UI is served by Contour at `https://mastrogiovanni.ddns.net/temporal`. See [../temporal/README.md](../temporal/README.md) for workers, demos, and teardown (`make down`).
-
-```
-Go worker pods (HPA-ready, 3 replicas)     Python worker pods (3 replicas)
-                 \                         /
-                  \       gRPC :7233      /
-                   v                     v
-              Temporal frontend / history / matching (3+ each)
-                              |
-                              v
-                     PostgreSQL (in-cluster)
-```
-
-Install after the Kind cluster exists:
+The Temporal HA stack lives in [`../temporal`](../temporal). After the Kind cluster exists:
 
 ```bash
 cd ../temporal && make up
 ```
 
-Worker images use `imagePullPolicy: Never` and must be loaded into Kind, same as echo-proxy. After code changes:
-
-```bash
-cd ../temporal && make redeploy-workers
-```
-
-Frontend address inside the cluster:
-
-```text
-temporal-frontend.temporal.svc.cluster.local:7233
-```
-
-Task queues:
-
-| Worker | Task queue |
-|--------|------------|
-| Go | `go-task-queue` |
-| Python | `python-task-queue` |
-
-The Go worker registers `EchoWorkflow`. The Python worker matches the resilience project: it runs in a Python+`uv` image and registers `SayHelloWorkflow` plus `Python`, which takes a Python script string and executes it with `uv run` (PEP 723 inline dependencies are downloaded at activity time).
-
-Start sample workflows:
-
-```bash
-cd ../temporal && make demo
-```
-
-`make demo` in `../temporal` starts:
-
-- `EchoWorkflow` on `go-task-queue`
-- `SayHelloWorkflow` on `python-task-queue`
-- `Python` on `python-task-queue`, using `examples/fetch_json.py`
-
-To run a script the same way as `resilience/starter.py` (start the `Python` workflow, wait, print stdout):
-
-```bash
-cd ../temporal && make python-demo
-```
-
-The Makefile port-forwards `temporal-frontend:7233`, then runs the host `starter/` uv project with a script path (default `examples/fetch_json.py`). The worker image does not contain the starter or example scripts.
-
-Use a different file:
-
-```bash
-cd ../temporal && make python-demo SCRIPT=/path/to/your_script.py
-```
-
-`uv` must be installed on the host. The worker receives the script source and runs `uv run script.py`.
-
-Then in the UI, set the namespace to **default** (top left) and look at:
-
-| Where | What you should see |
-|-------|---------------------|
-| **Workflows** | `go-echo-*`, `python-hello-*` (`SayHelloWorkflow`), `python-script-*` (`Python`) |
-| **Task Queues** → `go-task-queue` | Go worker pollers |
-| **Task Queues** → `python-task-queue` | Python worker pollers |
-| **Workers** | Heartbeating Go and Python workers (after the server picks up dynamic config) |
-
-Search the task queue names if they are not listed yet; pollers still exist even when the list is empty.
-
-Open the Temporal UI with:
-
-```bash
-cd ../temporal && make ui
-```
-
-That opens `https://mastrogiovanni.ddns.net/temporal`. Helm values live in [`../temporal/values.yaml`](../temporal/values.yaml).
+The Web UI is served by Contour at `https://mastrogiovanni.ddns.net/temporal`. See [../temporal/README.md](../temporal/README.md) for architecture, workers, demos, Helm values, and teardown (`make down`).
 
 ## SAI Fatture (sprar)
 
@@ -683,7 +598,7 @@ rm /tmp/auth
 
 **Temporal Helm install fails**
 
-- Use [`../temporal`](../temporal): `cd ../temporal && make up`
+- See [../temporal/README.md#troubleshooting](../temporal/README.md#troubleshooting)
 
 **Dashboard login shows invalid token**
 

@@ -59,7 +59,7 @@ Contour will only bind an authorizer to a virtual host that already terminates T
                      includes on ingress-root
                      ├── /echo-proxy  → echo-proxy
                      ├── /temporal    → Temporal UI
-                     └── /sprar       → SAI Fatture UI
+                     └── /sprar       → sprar
 ```
 
 Two TLS hops are involved, for different reasons:
@@ -77,7 +77,7 @@ The authserver certificate is not public. Clients never see it. Envoy talks to `
 
 1. Kind maps host `:443` to Envoy. SNI and the HTTP `Host` header must be `INGRESS_HOST` (from `config.env`).
 2. Contour has programmed this virtual host with `authorization.extensionRef = projectcontour-auth/htpasswd` and `failOpen: false`.
-3. Envoy does **not** send the request to sprar yet. It opens (or reuses) a gRPC stream to contour-authserver and sends a Check request that includes method, path, and headers (including `Authorization`, if any).
+3. Envoy does **not** send the request to the upstream app yet. It opens (or reuses) a gRPC stream to contour-authserver and sends a Check request that includes method, path, and headers (including `Authorization`, if any).
 4. contour-authserver looks up htpasswd data it has loaded from Secrets in `projectcontour-auth` annotated `projectcontour.io/auth-type: basic`.
 5. **No credentials, or unknown user, or bad password:** Check is denied. Envoy responds to the client with `401` and `WWW-Authenticate: Basic realm="default", charset="UTF-8"`. The body is empty. Apps never see the request.
 6. **Valid credentials:** Check is allowed. contour-authserver injects `Auth-Handler`, `Auth-Realm`, and `Auth-Username`. Envoy forwards the original request (still including `Authorization`) to the matched include (`/sprar`, …).
@@ -182,7 +182,7 @@ Image: `ghcr.io/projectcontour/contour-authserver:v4`.
 A 401 from Basic Auth has **no body**. Without `-i` or `-v`, a missing user looks like an empty response.
 
 ```bash
-curl -i -u 'alice:the-password-you-set' https://mastrogiovanni.ddns.net/sprar/
+curl -i -u 'alice:the-password-you-set' https://mastrogiovanni.ddns.net/echo-proxy
 ```
 
 `alice` exists only after `make auth-user AUTH_USER=alice …`. Example passwords in docs are not accounts.
@@ -191,15 +191,7 @@ curl -i -u 'alice:the-password-you-set' https://mastrogiovanni.ddns.net/sprar/
 
 For a **top-level navigation** that Envoy answers with `401` + `WWW-Authenticate: Basic`, Chrome/Firefox show a system dialog, not an HTML form. The dialog is attached to the origin (`https://INGRESS_HOST`), so the same pair is reused for `/sprar`, `/temporal`, and `/echo-proxy`.
 
-### Service workers (sprar PWA)
-
-sprar registers `sw.js` and caches `/sprar/`. Chrome **does not** show the Basic Auth dialog for fetches a service worker makes. If the worker was installed **before** auth was enabled:
-
-1. Chrome keeps the old worker when `sw.js` itself starts returning 401.
-2. Navigations are intercepted. The worker either surfaces an empty 401 (blank page) or falls back to the cached UI.
-3. It looks as if there is no password prompt.
-
-Workaround: Incognito (no old worker), or DevTools → Application → Clear site data for this origin, then reload. This is a browser/PWA limitation, not a broken ExtensionService. `curl` and Incognito still challenge correctly.
+PWAs that register a service worker may not show the Basic Auth dialog after auth is enabled. See [sprar web README — HTTP Basic Auth](../../sprar/web/README.md#http-basic-auth-contour).
 
 ## Trust and threat model
 
@@ -228,7 +220,7 @@ Treat htpasswd users as shared site passwords, not as a directory of people with
 | HTTPProxy `invalid` after enabling auth | `authorization` set but `tls.secretName` missing. `make cert` first. |
 | `make auth` deploys pods but no 401 | TLS secret was missing at attach time. `make auth-status`, then `make ingress-root`. |
 | 401 with empty body | Expected for unknown/wrong user. Create the user; use `curl -i`. |
-| Chrome shows the app with no dialog | sprar service worker cache. Clear site data or use Incognito. |
+| Chrome shows the app with no dialog | PWA service worker installed before auth. Clear site data or use Incognito. |
 | 401 after a password you just set | Hash written; secret annotation missing (`projectcontour.io/auth-type=basic`). `htpasswd-user.sh` sets it. |
 | Auth pod `CreateContainerConfigError` | Certificate `htpasswd` not Ready; cert-manager / ClusterIssuer `selfsigned` missing. |
 | Let’s Encrypt challenge stuck | Unrelated to Basic Auth if HTTP-01 uses its own Ingress. Do not add a `/.well-known` route on `ingress-root`. |

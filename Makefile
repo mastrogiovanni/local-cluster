@@ -133,7 +133,6 @@ platform:
 	@echo "  $(MAKE) -C $(ECHO_PROXY_DIR) up"
 	@echo "  $(MAKE) -C $(TEMPORAL_DIR) up"
 	@echo "  $(MAKE) -C $(SPRAR_DIR) up"
-	@echo "  $(MAKE) -C $(SPRAR_DIR) up OCR=baidu   # needs make up WITH_GPU=1 here first"
 	@echo "  curl -H \"Host: $(INGRESS_HOST)\" http://127.0.0.1/echo-proxy"
 	@echo "  curl https://$(INGRESS_HOST)/temporal"
 	@echo "  curl https://$(INGRESS_HOST)/sprar"
@@ -232,8 +231,8 @@ auth-user:
 	else \
 		echo "Password: (the AUTH_PASS you passed)"; \
 	fi; \
-	echo "Browser: https://$(INGRESS_HOST)/sprar"; \
-	echo "curl:    curl -u '$(AUTH_USER):PASSWORD' https://$(INGRESS_HOST)/sprar/"
+	echo "Browser: https://$(INGRESS_HOST)/echo-proxy"; \
+	echo "curl:    curl -u '$(AUTH_USER):PASSWORD' https://$(INGRESS_HOST)/echo-proxy"
 
 .PHONY: auth-user-delete
 auth-user-delete:

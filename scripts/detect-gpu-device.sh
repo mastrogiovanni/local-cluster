@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print the UUID of the preferred OCR GPU (RTX 4060 / 4060 Ti).
+# Print the UUID of the preferred GPU (RTX 4060 / 4060 Ti).
 # Override with GPU_DEVICE_UUID in the environment.
 set -euo pipefail
 

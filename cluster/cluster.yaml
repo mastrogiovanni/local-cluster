@@ -33,10 +33,10 @@ nodes:
         protocol: TCP
     extraMounts:
       # Host data-plane (substituted by k8s/Makefile) → node /data-plane.
-      # App PVs use hostPath /data-plane/<app>, e.g. sprar → ../../data-plane/sprar.
+      # App PVs use hostPath /data-plane/<app> on the Kind node.
       # Recreate the cluster after changing extraMounts: make down && make up
       - hostPath: __DATA_PLANE_HOST__
         containerPath: /data-plane
-      # Sprar repo for DEV=1 plugin/template bind-mounts (sprar/Makefile).
+      # App repo for DEV=1 bind-mounts (see sprar Makefile).
       - hostPath: __SPRAR_HOST__
         containerPath: /sprar-src

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the Kind node only exposes the OCR GPU (RTX 4060 family).
+# Verify the Kind node only exposes the preferred GPU (RTX 4060 family).
 # On cluster create, Makefile sets NVIDIA_VISIBLE_DEVICES for kind create.
 set -euo pipefail
 
@@ -24,7 +24,7 @@ fi
 
 chmod +x "$DETECT_SCRIPT"
 gpu_uuid="$("$DETECT_SCRIPT")"
-echo "Expected OCR GPU for Kind: $gpu_uuid"
+echo "Expected GPU for Kind: $gpu_uuid"
 
 if ! docker exec "$NODE" nvidia-smi -L >/dev/null 2>&1; then
   echo "Warning: nvidia-smi not available inside $NODE." >&2
@@ -38,7 +38,7 @@ if printf '%s\n' "$node_gpus" | grep -qi 'GTX 1060'; then
   echo "Warning: Kind node $NODE still sees GTX 1060." >&2
   echo "Recreate the cluster so only the RTX 4060 is passed to Kind:" >&2
   echo "  cd $KIND_DIR && make down && make up WITH_GPU=1" >&2
-  echo "Until then, sprar Baidu pins NVIDIA_VISIBLE_DEVICES=$gpu_uuid on the pod." >&2
+  echo "Until then, GPU workloads may pin NVIDIA_VISIBLE_DEVICES=$gpu_uuid on the pod." >&2
 fi
 
 if ! printf '%s\n' "$node_gpus" | grep -qiE 'RTX 4060'; then

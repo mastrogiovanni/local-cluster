@@ -23,7 +23,7 @@ HTTPProxy ingress-root (INGRESS_HOST; TLS after make cert)
     │  HTTP Basic Auth after make auth (TLS required)
     ├── /echo-proxy  →  ../echo-proxy
     ├── /temporal    →  ../temporal (Web UI)
-    └── /sprar       →  ../../sprar (SAI Fatture UI)
+    └── /sprar       →  ../../sprar
 ```
 
 App directories register path includes on `ingress-root`. After they are deployed, Contour forwards those prefixes on `INGRESS_HOST`.
@@ -37,7 +37,7 @@ App directories register path includes on `ingress-root`. After they are deploye
 - [Helm 3](https://helm.sh/docs/intro/install/) (required for Kubernetes Dashboard and optional app installs such as Temporal)
 - Localhost ports **80** and **443** must be free (Kind binds Contour there)
 
-For GPU workloads (e.g. sprar Baidu OCR), you also need:
+For GPU workloads (optional), you also need:
 
 - NVIDIA driver (`nvidia-smi` works on the host)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) configured for Docker
@@ -92,7 +92,7 @@ make up WITH_DASHBOARD=1
 
 ### GPU-enabled cluster (optional)
 
-For apps that request `nvidia.com/gpu` (sprar Baidu OCR), recreate the cluster with GPU support and install the NVIDIA device plugin:
+For workloads that request `nvidia.com/gpu`, recreate the cluster with GPU support and install the NVIDIA device plugin:
 
 ```bash
 make down
@@ -227,30 +227,15 @@ cd ../temporal && make up
 
 The Web UI is served by Contour at `https://mastrogiovanni.ddns.net/temporal`. See [../temporal/README.md](../temporal/README.md) for architecture, workers, demos, Helm values, and teardown (`make down`).
 
-## SAI Fatture (sprar)
+## sprar
 
-The invoice UI lives in [`../../sprar`](../../sprar). After the Kind cluster exists:
+The sprar web app lives in [`../../sprar`](../../sprar). After the Kind cluster exists:
 
 ```bash
 cd ../../sprar && make up
 ```
 
-Contour serves it at `https://mastrogiovanni.ddns.net/sprar`. SQLite and uploads persist on the host in [`../../data-plane/sprar`](../../data-plane/sprar) via a hostPath PV (Kind extraMount). `make down` in sprar removes only the app; host files stay.
-
-### Baidu OCR (GPU)
-
-Sprar can use [Baidu Unlimited-OCR](https://github.com/baidu/Unlimited-OCR) instead of Tesseract. The cluster must advertise `nvidia.com/gpu`:
-
-```bash
-# From this directory (control-plane/k8s)
-make down && make up WITH_GPU=1
-make gpu-status    # should show GPU: 1 (or your GPU count)
-
-# Deploy sprar with the CUDA image
-cd ../../sprar && make up OCR=baidu
-```
-
-The sprar pod uses `runtimeClassName: nvidia` and requests one GPU. First OCR run downloads the Hugging Face model inside the pod (large, slow). Without `WITH_GPU=1`, `make up OCR=baidu` leaves the pod **Pending** (`Insufficient nvidia.com/gpu`).
+Contour serves it at `https://mastrogiovanni.ddns.net/sprar`. See [`../../sprar/web/README.md`](../../sprar/web/README.md) for persistence, GPU OCR, dev overlays, and teardown (`make down`).
 
 ## Kubernetes Dashboard
 
@@ -491,7 +476,7 @@ make auth
 The browser then shows its native username/password dialog. `curl` uses `-u`:
 
 ```bash
-curl -u 'admin:PASSWORD' https://mastrogiovanni.ddns.net/sprar/
+curl -u 'admin:PASSWORD' https://mastrogiovanni.ddns.net/echo-proxy
 ```
 
 HTTP on port 80 is redirected to HTTPS once TLS is attached; the Basic Auth prompt appears on HTTPS.
@@ -521,7 +506,7 @@ make auth-user-delete AUTH_USER=alice
 
 Use `AUTH_USER` / `AUTH_PASS`, not `USER` / `PASSWORD`. `USER` is already your OS login name, so `make auth-user USER=alice` would not do what you expect.
 
-Give someone access by sending them the username, the password, and the URL (`https://mastrogiovanni.ddns.net/sprar`). The same credentials work for every UI on this host.
+Give someone access by sending them the username, the password, and the app URL. The same credentials work for every UI on this host.
 
 contour-authserver watches the Secret, so adding a user takes effect without restarting the auth pod.
 
@@ -644,7 +629,7 @@ rm /tmp/auth
 **CUDA / nvidia-smi fails inside a GPU pod**
 
 - Host toolkit paths may differ from `cluster/cluster.gpu.yaml` — adjust `extraMounts` and recreate Kind
-- Confirm `runtimeClassName: nvidia` on the workload (sprar baidu overlay sets this)
+- Confirm the workload sets `runtimeClassName: nvidia` and requests `nvidia.com/gpu`
 - Test Docker GPU access: `docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi`
 
 ## kubectl context

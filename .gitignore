@@ -1,0 +1,4 @@
+.config.mk
+.config.mk.tmp
+config.env.tmp
+*.swp

@@ -1,0 +1,105 @@
+# Shared OpenBao, file storage on a PVC. `make openbao` initialises and unseals it
+# (scripts/openbao.sh); unseal key + root token live in the host data-plane dir.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  namespace: {{ services.namespace }}
+data:
+  config.hcl: |
+    ui            = true
+    disable_mlock = true
+    api_addr      = "http://openbao.{{ services.namespace }}.svc.cluster.local:8200"
+
+    storage "file" {
+      path = "/openbao/data"
+    }
+
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = true
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  namespace: {{ services.namespace }}
+  labels:
+    app: openbao
+spec:
+  # Reachable while sealed so `bao operator unseal` works through the Service too.
+  publishNotReadyAddresses: true
+  ports:
+    - name: http
+      port: 8200
+      targetPort: 8200
+  selector:
+    app: openbao
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao
+  namespace: {{ services.namespace }}
+  labels:
+    app: openbao
+    app.kubernetes.io/part-of: control-plane
+spec:
+  serviceName: openbao
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openbao
+  template:
+    metadata:
+      labels:
+        app: openbao
+    spec:
+      securityContext:
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: openbao
+          image: {{ services.openbao.image }}
+          command: ["bao", "server", "-config=/openbao/config/config.hcl"]
+          env:
+            - name: BAO_ADDR
+              value: http://127.0.0.1:8200
+            - name: SKIP_SETCAP
+              value: "true"
+          ports:
+            - containerPort: 8200
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # Ready only once initialised and unsealed.
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /openbao/config
+            - name: data
+              mountPath: /openbao/data
+      volumes:
+        - name: config
+          configMap:
+            name: openbao-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ services.openbao.storage }}

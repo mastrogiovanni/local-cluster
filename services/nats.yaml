@@ -1,0 +1,106 @@
+# Shared NATS server (optional JetStream). Client token: Secret nats/token (created by `make nats`).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  namespace: {{ services.namespace }}
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222
+    server_name: nats-0
+    authorization {
+      token: $NATS_TOKEN
+    }
+    {{ services.nats.jetstream_conf }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: {{ services.namespace }}
+  labels:
+    app: nats
+spec:
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+  selector:
+    app: nats
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: {{ services.namespace }}
+  labels:
+    app: nats
+    app.kubernetes.io/part-of: control-plane
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+      annotations:
+        control-plane/config-jetstream: "{{ services.nats.jetstream }}"
+    spec:
+      containers:
+        - name: nats
+          image: {{ services.nats.image }}
+          args: ["-c", "/etc/nats/nats.conf"]
+          env:
+            - name: NATS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nats
+                  key: token
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 8222
+              name: monitor
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz?js-enabled-only=true
+              port: 8222
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: nats-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ services.nats.storage }}

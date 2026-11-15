@@ -1,5 +1,5 @@
 # Default Kind cluster (no GPU). For NVIDIA GPU support use cluster.gpu.yaml via:
-#   make down && make up WITH_GPU=1
+#   [gpu] enabled = true in config.toml, then make down && make up
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 containerdConfigPatches:
@@ -32,11 +32,10 @@ nodes:
         listenAddress: "127.0.0.1"
         protocol: TCP
     extraMounts:
-      # Host data-plane (substituted by k8s/Makefile) → node /data-plane.
+      # Host data-plane ([cluster] data_plane_dir in config.toml) → node /data-plane.
       # App PVs use hostPath /data-plane/<app> on the Kind node.
       # Recreate the cluster after changing extraMounts: make down && make up
-      - hostPath: __DATA_PLANE_HOST__
+      - hostPath: {{ cluster.data_plane_dir }}
         containerPath: /data-plane
-      # App repo for DEV=1 bind-mounts (see sprar Makefile).
-      - hostPath: __SPRAR_HOST__
-        containerPath: /sprar-src
+      # Extra mounts from [cluster] mounts in config.toml.
+{{ cluster.mounts_yaml }}

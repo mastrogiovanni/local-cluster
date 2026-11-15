@@ -1,3 +1,5 @@
+# Let's Encrypt issuers (HTTP-01 through Contour). Rendered by `make tls` from config.toml;
+# [ingress] tls_issuer picks which one the Certificate uses.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -5,9 +7,24 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: __ACME_EMAIL__
+    email: {{ ingress.acme_email }}
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
+    solvers:
+    - http01:
+        ingress:
+          ingressClassName: contour
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: {{ ingress.acme_email }}
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
     solvers:
     - http01:
         ingress:

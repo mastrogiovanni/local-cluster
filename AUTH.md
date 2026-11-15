@@ -1,6 +1,6 @@
 # Ingress HTTP Basic Auth
 
-This cluster does not put login logic in sprar, Temporal, or echo-proxy. A single gate on the shared Contour virtual host (`ingress-root`) asks Envoy to check every HTTPS request with [contour-authserver](https://github.com/projectcontour/contour-authserver) before the request is forwarded to an app.
+This cluster does not put login logic in any app. A single gate on the shared Contour virtual host (`ingress-root`) asks Envoy to check every HTTPS request with [contour-authserver](https://github.com/projectcontour/contour-authserver) before the request is forwarded to an app.
 
 The challenge is **HTTP Basic Auth**: the browser shows its native username/password dialog; `curl` sends `Authorization: Basic …`. There is no HTML login page and no session cookie.
 
@@ -8,7 +8,7 @@ Operator commands (`make auth`, `make auth-user`, …) live in [README.md](READM
 
 ## Goals
 
-- Protect every UI on `INGRESS_HOST` (`/sprar`, `/temporal`, `/echo-proxy`, and future includes) without changing those apps.
+- Protect every UI on `INGRESS_HOST` (every include on `ingress-root`) without changing those apps.
 - Issue credentials with a Makefile, not an identity provider.
 - Keep plaintext passwords out of git. Store hashes in a Kubernetes Secret.
 - Fail closed: if the auth server is down, Envoy must not forward the request (`failOpen: false`).
@@ -23,7 +23,7 @@ Contour does not implement Basic Auth itself. From 1.9 it supports [external aut
 
 HTTP Basic is the smallest UX that matches “give someone a username and a password.” A custom “paste a token” page would need a cookie-issuing app in front of Envoy. OIDC (oauth2-proxy, Keycloak, Authelia) is heavier than this homelab needs.
 
-Contour will only bind an authorizer to a virtual host that already terminates TLS. That is a Contour constraint, not a local choice. `make cert` must succeed before `make auth` can attach the gate.
+Contour will only bind an authorizer to a virtual host that already terminates TLS. That is a Contour constraint, not a local choice. TLS (`[ingress] tls = true` in `config.toml`, or `make tls`) must succeed before `make auth` can attach the gate; `make up` orders them that way.
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Contour will only bind an authorizer to a virtual host that already terminates T
                           TCP/80                    TCP/443
                              │                          │
                              ▼                          ▼
-                    HTTP → 301 HTTPS              TLS (echo-app-tls)
+                    HTTP → 301 HTTPS              TLS (ingress-root-tls)
                              │                          │
                              └──────────► Contour Envoy (hostPort on Kind)
                                                 │
@@ -57,16 +57,14 @@ Contour will only bind an authorizer to a virtual host that already terminates T
                                                 │
                                                 ▼
                      includes on ingress-root
-                     ├── /echo-proxy  → echo-proxy
-                     ├── /temporal    → Temporal UI
-                     └── /sprar       → sprar
+                     └── /<prefix>    → app registered by its own deploy
 ```
 
 Two TLS hops are involved, for different reasons:
 
 | Hop | Secret | Issuer | Purpose |
 |-----|--------|--------|---------|
-| Browser → Envoy | `k8s-local/echo-app-tls` | Let’s Encrypt (`make cert`) | Public HTTPS for `INGRESS_HOST` |
+| Browser → Envoy | `k8s-local/ingress-root-tls` (`[ingress] tls_secret`) | cert-manager (`[ingress] tls_issuer`, `make tls`) | Public HTTPS for `INGRESS_HOST` |
 | Envoy → authserver | `projectcontour-auth/htpasswd` | ClusterIssuer `selfsigned` | Envoy Check API is HTTP/2 over TLS (`protocol: h2`) |
 
 The authserver certificate is not public. Clients never see it. Envoy talks to `htpasswd.projectcontour-auth.svc:9443`. The ExtensionService does not set `spec.validation`, so Envoy does not verify that self-signed cert (same as Contour’s own guide).
@@ -80,7 +78,7 @@ The authserver certificate is not public. Clients never see it. Envoy talks to `
 3. Envoy does **not** send the request to the upstream app yet. It opens (or reuses) a gRPC stream to contour-authserver and sends a Check request that includes method, path, and headers (including `Authorization`, if any).
 4. contour-authserver looks up htpasswd data it has loaded from Secrets in `projectcontour-auth` annotated `projectcontour.io/auth-type: basic`.
 5. **No credentials, or unknown user, or bad password:** Check is denied. Envoy responds to the client with `401` and `WWW-Authenticate: Basic realm="default", charset="UTF-8"`. The body is empty. Apps never see the request.
-6. **Valid credentials:** Check is allowed. contour-authserver injects `Auth-Handler`, `Auth-Realm`, and `Auth-Username`. Envoy forwards the original request (still including `Authorization`) to the matched include (`/sprar`, …).
+6. **Valid credentials:** Check is allowed. contour-authserver injects `Auth-Handler`, `Auth-Realm`, and `Auth-Username`. Envoy forwards the original request (still including `Authorization`) to the matched include.
 
 A successful Check is per request. HTTP Basic has no server-side session. The browser caches the pair for this origin (scheme + host + port) and resends it on later requests until the tab/profile forgets it.
 
@@ -99,7 +97,7 @@ Child includes cannot opt out. There is no per-app username. One Secret, one rea
 
 ## Kubernetes objects
 
-Namespace `projectcontour-auth` is dedicated to the authorizer so its RBAC can be scoped. Apps stay in `k8s-local` (and Temporal in `temporal`).
+Namespace `projectcontour-auth` is dedicated to the authorizer so its RBAC can be scoped. Apps live in `k8s-local` or their own namespaces.
 
 ```
 projectcontour-auth
@@ -112,14 +110,14 @@ projectcontour-auth
     Secret passwords                    # htpasswd file; not in git
 ```
 
-`k8s-local/ingress-root` is the only HTTPProxy that may set `virtualhost.authorization`. `make ingress-root` (and therefore `make cert` / `make auth`) patches:
+`k8s-local/ingress-root` is the only HTTPProxy that may set `virtualhost.authorization`. `make ingress-root` (and therefore `make tls` / `make auth`) patches:
 
 ```yaml
 spec:
   virtualhost:
     fqdn: <INGRESS_HOST>
     tls:
-      secretName: echo-app-tls
+      secretName: ingress-root-tls
     authorization:
       failOpen: false
       extensionRef:
@@ -182,16 +180,16 @@ Image: `ghcr.io/projectcontour/contour-authserver:v4`.
 A 401 from Basic Auth has **no body**. Without `-i` or `-v`, a missing user looks like an empty response.
 
 ```bash
-curl -i -u 'alice:the-password-you-set' https://mastrogiovanni.ddns.net/echo-proxy
+curl -i -u 'alice:the-password-you-set' https://mastrogiovanni.ddns.net/<prefix>
 ```
 
 `alice` exists only after `make auth-user AUTH_USER=alice …`. Example passwords in docs are not accounts.
 
 ### Browser (native dialog)
 
-For a **top-level navigation** that Envoy answers with `401` + `WWW-Authenticate: Basic`, Chrome/Firefox show a system dialog, not an HTML form. The dialog is attached to the origin (`https://INGRESS_HOST`), so the same pair is reused for `/sprar`, `/temporal`, and `/echo-proxy`.
+For a **top-level navigation** that Envoy answers with `401` + `WWW-Authenticate: Basic`, Chrome/Firefox show a system dialog, not an HTML form. The dialog is attached to the origin (`https://INGRESS_HOST`), so the same pair is reused for every path.
 
-PWAs that register a service worker may not show the Basic Auth dialog after auth is enabled. See [sprar web README — HTTP Basic Auth](../../sprar/web/README.md#http-basic-auth-contour).
+PWAs that register a service worker may not show the Basic Auth dialog after auth is enabled; such apps have to handle that themselves.
 
 ## Trust and threat model
 
@@ -217,7 +215,7 @@ Treat htpasswd users as shared site passwords, not as a directory of people with
 
 | Symptom | Usual cause |
 |---------|------------|
-| HTTPProxy `invalid` after enabling auth | `authorization` set but `tls.secretName` missing. `make cert` first. |
+| HTTPProxy `invalid` after enabling auth | `authorization` set but `tls.secretName` missing. Enable `[ingress] tls` (or `make tls`) first. |
 | `make auth` deploys pods but no 401 | TLS secret was missing at attach time. `make auth-status`, then `make ingress-root`. |
 | 401 with empty body | Expected for unknown/wrong user. Create the user; use `curl -i`. |
 | Chrome shows the app with no dialog | PWA service worker installed before auth. Clear site data or use Incognito. |

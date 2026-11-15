@@ -1,5 +1,5 @@
 # GPU-enabled Kind cluster (NVIDIA Container Toolkit on the host required).
-# Use: make down && make up WITH_GPU=1
+# Used when [gpu] enabled = true in config.toml (make down && make up to apply).
 # Recreate after any change to this file.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -34,11 +34,10 @@ nodes:
         listenAddress: "127.0.0.1"
         protocol: TCP
     extraMounts:
-      - hostPath: __DATA_PLANE_HOST__
+      - hostPath: {{ cluster.data_plane_dir }}
         containerPath: /data-plane
-      - hostPath: __SPRAR_HOST__
-        containerPath: /sprar-src
-      # Kind GPU injection (requires accept-nvidia-visible-devices-as-volume-mounts=true
+      # Extra mounts from [cluster] mounts in config.toml.
+{{ cluster.mounts_yaml }}      # Kind GPU injection (requires accept-nvidia-visible-devices-as-volume-mounts=true
       # in /etc/nvidia-container-runtime/config.toml). The host path does not need to
       # exist as a directory; /dev/null satisfies the runtime mount contract.
       - hostPath: /dev/null

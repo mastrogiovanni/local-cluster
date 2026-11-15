@@ -1,0 +1,92 @@
+# Control-plane configuration: the single source of truth for `make up`.
+#
+# - Relative paths are resolved from this directory (k8s/).
+# - Anything left out falls back to the defaults in scripts/config.py (`make config` shows the result).
+# - Command-line overrides still win for one-off runs: `make up WITH_GPU=1`, `make up CONFIG=other.toml`.
+# - config.env is GENERATED from this file for sibling app Makefiles; do not edit it by hand.
+
+[cluster]
+name = "k8s"                       # Kind cluster name; kube context is kind-<name>
+namespace = "k8s-local"            # namespace holding ingress-root (apps include their routes into it)
+data_plane_dir = "../../data-plane" # host dir mounted at /data-plane on the Kind node
+# Extra host dirs mounted into the Kind node (applied at cluster create), e.g.
+#   mounts = [{ host = "../../myapp", node = "/myapp-src" }]
+mounts = []
+
+[ingress]
+host = "mastrogiovanni.ddns.net"   # hostname Contour matches on ingress-root
+acme_email = "michele.mastrogiovanni@gmail.com"  # Let's Encrypt account (letsencrypt issuers)
+tls = true                         # `make up` issues the certificate and attaches it to ingress-root
+# "letsencrypt"         real certificate, HTTP-01 (host must reach this machine on public :80)
+# "letsencrypt-staging" same flow, untrusted certs, generous rate limits (for testing)
+# "selfsigned"          no ACME, works offline; browsers will warn
+tls_issuer = "letsencrypt"
+tls_secret = "ingress-root-tls"  # exported to config.env as TLS_SECRET
+
+[gpu]
+enabled = false                    # GPU Kind node + NVIDIA device plugin (recreate cluster to toggle)
+# Which GPU to expose to Kind: a UUID ("GPU-...") or an nvidia-smi index ("1").
+# Empty: the first GPU whose name matches `match`. List them with `nvidia-smi -L`.
+device_id = "GPU-2ea93ea1-3f77-449c-8915-1f1733c7e598"   # NVIDIA GeForce RTX 4060 Ti
+match = "RTX 4060"
+device_plugin_image = "localhost/k8s-device-plugin:v0.17.0"
+
+[dashboard]
+enabled = false                    # Kubernetes Dashboard (+ metrics-server) via Helm
+local_port = 8443                  # fixed by the Kind port mapping in cluster/*.yaml
+
+[auth]
+enabled = false                    # HTTP Basic Auth on ingress-root (requires ingress.tls)
+user = "admin"                     # first user; password generated and printed once
+
+# ---------------------------------------------------------------------------
+# Shared services, deployed into services.namespace. Reach them in-cluster at
+# <service>.<namespace>.svc.cluster.local, or from the host with `make <service>-forward`.
+# Empty passwords/tokens are generated once and stored in a Secret (`make services-info`).
+# ---------------------------------------------------------------------------
+[services]
+namespace = "k8s-services"
+
+[services.postgres]
+enabled = false
+image = "postgres:16-alpine"
+user = "postgres"
+database = "postgres"
+databases = []                     # extra databases created idempotently, e.g. ["app1", "app2"]
+password = ""
+storage = "8Gi"
+local_port = 5432
+
+[services.redis]
+enabled = false
+image = "redis:7.4-alpine"
+password = ""
+storage = "2Gi"
+maxmemory = "256mb"
+local_port = 6379
+
+[services.nats]
+enabled = false
+image = "nats:2.10-alpine"
+jetstream = true                   # persistent streams on a PVC
+storage = "4Gi"
+token = ""                         # client auth token
+local_port = 4222
+monitor_local_port = 8222
+
+[services.openbao]
+enabled = false
+image = "openbao/openbao:2.2.0"
+# "standalone": file storage on a PVC; `make up` initialises and unseals it, keys saved under
+#               <data_plane_dir>/control-plane/openbao/ (chmod 600).
+# "dev":        in-memory, always unsealed, data lost on restart.
+mode = "standalone"
+storage = "1Gi"
+dev_root_token = ""                # dev mode only
+local_port = 8200
+
+
+# ---------------------------------------------------------------------------
+# Extra variables written to config.env for app Makefiles, e.g. MY_VAR = "value".
+# ---------------------------------------------------------------------------
+[env]

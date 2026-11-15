@@ -161,7 +161,7 @@ make down
 | `make auth-off` / `make auth-status` | Detach auth from ingress-root, or print whether it is attached |
 | `make dashboard` | Install the Kubernetes Dashboard, metrics-server, and admin login user |
 | `make dashboard-token` | Print the admin bearer token used to sign in |
-| `make dashboard-proxy` | Fallback port-forward if Kind's `:8443` mapping is missing |
+| `make dashboard-proxy` | Port-forward Kong to `:8443` if the Kind mapping is missing |
 | `make dashboard-open` / `make dashboard-ui` | Install if needed, print/copy the token, and open `https://127.0.0.1:8443` |
 
 ## Project layout
@@ -252,102 +252,83 @@ down:
 
 ## Kubernetes Dashboard
 
-The Kubernetes Dashboard is opt-in. It is a web UI for inspecting namespaces, workloads, pods, logs, and events. This local install also enables **metrics-server** so CPU/memory graphs can appear (Kind kubelets use self-signed certs, so the chart is configured with `--kubelet-insecure-tls`).
+The Kubernetes Dashboard is a web UI for namespaces, workloads, pods, logs and events. The install also enables **metrics-server** for CPU/memory graphs. Kind kubelets use self-signed certs, so metrics-server runs with `--kubelet-insecure-tls`.
 
-The upstream project is archived; this repo still installs it because it is the familiar cluster UI and works well on Kind. The Helm chart is pulled from `https://kubernetes-retired.github.io/dashboard/` (the old `kubernetes.github.io` index returns 404). Values live in `dashboard/values.yaml`.
-
-The Helm chart ships Kong as an HTTPS gateway. Token login **only works over HTTPS**. Kind maps host `8443` to Kong's NodePort (`30443`). Contour stays on localhost `80`/`443`.
+The Helm chart (from `https://kubernetes-retired.github.io/dashboard/`, values in `dashboard/values.yaml`) puts a **Kong** gateway in front of the Dashboard. Kong is the only entry point. It terminates HTTPS with a self-signed certificate and routes to the web UI, API and auth backends. Only Kong's proxy is enabled (no Kong Manager / admin API). Kind maps Kong's NodePort `30443` to **`127.0.0.1:8443`** on the host. Contour keeps `80`/`443`.
 
 ```
-Browser  →  https://127.0.0.1:8443  →  Kind extraPortMapping
-                                              │
-                                              v
-                               kubernetes-dashboard-kong-proxy:443
-                                              │
-                    +-------------------------+-------------------------+
-                    v                         v                         v
-              dashboard-web              dashboard-api              dashboard-auth
+Browser ──https──► 127.0.0.1:8443 ──Kind port mapping──► NodePort 30443
+                                                             │
+                                          kubernetes-dashboard-kong-proxy:443  (Kong, self-signed TLS)
+                                                             │
+                              ┌──────────────────────────────┼──────────────────────────────┐
+                              ▼                              ▼                              ▼
+                       dashboard-web                  dashboard-api                  dashboard-auth
 ```
 
-### Install
+### Enable
 
-After the Kind cluster exists:
+In `config.toml`:
 
-```bash
-make dashboard
+```toml
+[dashboard]
+enabled = true
 ```
 
-Or with the rest of the stack:
-
-```bash
-make up WITH_DASHBOARD=1
-```
-
-This will:
-
-1. Install the Dashboard Helm release in namespace `kubernetes-dashboard` (Kong gateway, web, API, auth, metrics-scraper)
-2. Install metrics-server (Kind-compatible flags)
-3. Create an `admin-user` ServiceAccount bound to `cluster-admin`
-4. Create a long-lived token Secret so you can sign in
-
-`cluster-admin` is appropriate for this local Kind cluster only. Do not reuse this pattern on a shared or production cluster.
+Then run `make up`, or `make dashboard` on a running cluster. This installs the Helm release in namespace `kubernetes-dashboard`, plus metrics-server. It also creates an `admin-user` ServiceAccount bound to `cluster-admin` with a long-lived token Secret. `cluster-admin` is fine for this local cluster only; do not copy this to a shared one.
 
 ### Open and sign in
 
-One command installs (if needed), prints the token, copies it to the clipboard when `pbcopy`/`xclip`/`wl-copy` is available, and opens the browser:
-
 ```bash
-make dashboard-open
-# or
-make dashboard-ui
+make dashboard-open    # installs if missing, prints + copies the token, opens the browser
 ```
 
-Then in the browser:
-
-1. Open [https://127.0.0.1:8443](https://127.0.0.1:8443) if it did not open automatically
-2. Accept the self-signed certificate warning (Kong uses a cluster-internal cert)
+1. Go to **[https://127.0.0.1:8443](https://127.0.0.1:8443)**. It must be `https`; `http://` gets a `400` from Kong.
+2. Accept the self-signed certificate warning:
    - Chrome: **Advanced → Proceed to 127.0.0.1** (or type `thisisunsafe` on the warning page)
-   - Safari: **Show Details → visit this website**
    - Firefox: **Advanced → Accept the Risk and Continue**
-3. Choose **Token** (not kubeconfig)
-4. Paste the token and click **Sign in**
+   - Safari: **Show Details → visit this website**
+3. Choose **Token**, paste the token, then click **Sign in**.
 
-Print the token again at any time:
+`make dashboard-token` prints the token again. It does not expire, because it comes from the `admin-user` Secret. The token is copied to the clipboard when `pbcopy`, `xclip` or `wl-copy` is installed.
 
-```bash
-make dashboard-token
-```
+Pick **All namespaces** in the namespace selector to see every workload. CPU/memory graphs appear a minute or so after metrics-server starts.
 
-Kind extraPortMappings are applied only when the cluster is created. If `https://127.0.0.1:8443` hits Contour (SSL handshake error) or nothing, the cluster was created before this mapping existed. Recreate it:
+### From another machine
 
-```bash
-make down && make up WITH_DASHBOARD=1
-```
-
-Fallback port-forward (only if the Kind mapping is missing):
+Port `8443` is bound to `127.0.0.1` on purpose: the token is cluster-admin. Do not expose it on the LAN or through `ingress-root`. Tunnel over SSH instead:
 
 ```bash
-make dashboard-proxy
+ssh -N -L 8443:127.0.0.1:8443 user@this-host
+# then browse https://127.0.0.1:8443 on the remote machine
 ```
 
-### Why not http:// or port 443?
+### Without the Kind port mapping
 
-| Attempt | Result |
-|---------|--------|
-| `http://127.0.0.1:8443` | Login fails with an invalid token. Dashboard allows token login only over HTTPS. |
-| `https://127.0.0.1:443` | Contour TLS (main ingress), not the dashboard. |
-| Ingress through Contour on `:80` | That path is HTTP. Token login would fail. |
+Clusters created before the `30443 → 127.0.0.1:8443` mapping existed don't have it. Kind mappings only apply when the cluster is created. Check with `docker port k8s-control-plane`, which should list `30443/tcp -> 127.0.0.1:8443`. Either recreate the cluster (`make down && make up`) or port-forward Kong directly:
 
-Use [https://127.0.0.1:8443](https://127.0.0.1:8443) after `make dashboard`.
+```bash
+make dashboard-proxy   # kubectl port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
+```
 
-### What you can see after login
+### Check it from the CLI
 
-- **Workloads** in `k8s-local`, `k8s-services`, app namespaces, `kubernetes-dashboard`, and `projectcontour`
-- Pod logs and describe views
-- CPU/memory once metrics-server is scraping (may take a minute after install)
-- Cluster objects (nodes, namespaces, events)
+```bash
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/                 # 200: Kong + web UI
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/api/v1/namespace \
+  -H "Authorization: Bearer $(make -s dashboard-token)"                            # 200: token accepted
+kubectl get pods,svc -n kubernetes-dashboard --context kind-k8s
+```
 
-The default namespace dropdown may show `default`. Switch it to **All namespaces** to see app workloads.
+### Common problems
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| "Invalid token" or login loops | Page opened over `http://`. Token login only works over HTTPS. |
+| `https://127.0.0.1:443` shows something else | That's Contour (main ingress), not the Dashboard. Use `:8443`. |
+| SSL handshake error or connection refused on `:8443` | Port mapping is missing (see above) or Kong is not ready: `kubectl get pods -n kubernetes-dashboard --context kind-k8s` |
+| Empty token | Token Secret not populated yet. Re-run `make dashboard`. |
+| No CPU/memory graphs | metrics-server is still starting: `kubectl top nodes --context kind-k8s` |
 
 ## Accessing services
 
@@ -572,22 +553,6 @@ rm /tmp/auth
 
 - Recreate the user (passwords are hashed; they cannot be recovered): `make auth-user AUTH_USER=alice`
 - Confirm the Secret has the annotation: `kubectl get secret passwords -n projectcontour-auth -o yaml --context kind-k8s`
-
-**Dashboard login shows invalid token**
-
-- You must use `https://127.0.0.1:8443`, not `http://`
-- Get a fresh token: `make dashboard-token`
-- Confirm the admin user exists: `kubectl get sa,secret,clusterrolebinding -n kubernetes-dashboard --context kind-k8s`
-
-**`https://localhost:8443` shows an SSL error or an app page**
-
-- The current Kind cluster still maps `8443` to Contour (old config). Recreate: `make down && make up WITH_DASHBOARD=1`
-- Confirm Docker published ports include `127.0.0.1:8443->30443/tcp`
-
-**Browser refuses the dashboard certificate**
-
-- Expected. Kong presents a self-signed certificate. Use Advanced → Proceed / Accept
-- Do not switch the URL to HTTP; token login will then fail
 
 **`make dashboard-proxy` fails with address already in use**
 
